@@ -1,8 +1,13 @@
 
 import { DrawEventParams } from '../common/type'
 import Plugin from './Plugin'
+import { i18n } from '../common/utils';
 
 export default class Download extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'download'
   iconfont = 'iconfont icon-download'
   title = '下载图片'

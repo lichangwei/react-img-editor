@@ -2,12 +2,16 @@
 import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams, PluginParamValue, PluginParamName } from '../common/type'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 const tileHeight = 5
 const tileWidth = 5
 
 export default class Mosaic extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'mosaic'
   iconfont = 'iconfont icon-mosaic'
   title = '马赛克'

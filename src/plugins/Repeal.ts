@@ -1,8 +1,13 @@
 import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams } from '../common/type'
+import { i18n } from '../common/utils';
 
 export default class Repeal extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'repeal'
   iconfont = 'iconfont icon-repeal'
   title = '撤销'

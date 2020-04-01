@@ -2,12 +2,16 @@ import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams } from '../common/type'
 import { transformerStyle } from '../common/constants'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 const toolbarWidth = 275
 const toolbarHeight = 40
 
 export default class Crop extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'crop'
   iconfont = 'iconfont icon-cut'
   title = '图片裁剪'
@@ -81,7 +85,7 @@ export default class Crop extends Plugin {
     fragment.appendChild($cropToolbar)
 
     // 创建文本
-    const $textNode = document.createTextNode('拖动边框调整图片显示范围')
+    const $textNode = document.createTextNode(i18n.t('image.editor.plugin.crop.drag'))
     $cropToolbar.appendChild($textNode)
 
     const btnStyle = 'display: inline-block; width: 32px; height: 24px; border: 1px solid #C9C9D0;' +

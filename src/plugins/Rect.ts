@@ -2,9 +2,13 @@ import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams, PluginParamName, PluginParamValue } from '../common/type'
 import { transformerStyle } from '../common/constants'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 export default class Rect extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'rect'
   iconfont = 'iconfont icon-square'
   title = '插入矩形'

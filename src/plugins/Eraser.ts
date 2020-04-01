@@ -1,9 +1,13 @@
 import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams, PluginParamName, PluginParamValue } from '../common/type'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 export default class Eraser extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'eraser'
   iconfont = 'iconfont icon-eraser'
   title = '擦除'

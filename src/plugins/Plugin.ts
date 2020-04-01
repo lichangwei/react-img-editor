@@ -1,9 +1,10 @@
-import { DrawEventParams, PluginParamName, PluginParamValue } from '../common/type'
+import { DrawEventParams, PluginParamName, PluginParamValue, ITranslate } from '../common/type'
 
 export default abstract class Plugin {
   abstract name: string;
   abstract iconfont: string;
   abstract title: string;
+  t: ITranslate = () => '';
   params?: PluginParamName[];
   defaultParamValue?: PluginParamValue;
   shapeName?: string;

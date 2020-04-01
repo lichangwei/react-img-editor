@@ -3,9 +3,13 @@ import Plugin from './Plugin'
 import PubSub from '../common/PubSub'
 import { DrawEventParams, PluginParamValue, PluginParamName } from '../common/type'
 import { transformerStyle } from '../common/constants'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 export default class Text extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'text'
   iconfont = 'iconfont icon-text'
   title = '插入文字'

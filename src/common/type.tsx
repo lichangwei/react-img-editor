@@ -21,3 +21,5 @@ export interface PluginParamValue {
   fontSize?: number;
   lineType?: 'solid' | 'dash';
 }
+
+export type ITranslate = (key: string) => string;

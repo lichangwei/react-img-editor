@@ -1,9 +1,13 @@
 import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams, PluginParamName, PluginParamValue } from '../common/type'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 export default class Pen extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'pen'
   iconfont = 'iconfont icon-pen'
   title = '画笔'

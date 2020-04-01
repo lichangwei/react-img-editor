@@ -2,12 +2,16 @@ import Konva from 'konva'
 import Plugin from './Plugin'
 import { DrawEventParams, PluginParamName, PluginParamValue } from '../common/type'
 import { transformerStyle } from '../common/constants'
-import { uuid } from '../common/utils'
+import { uuid, i18n } from '../common/utils'
 
 export default class Circle extends Plugin {
+  constructor(){
+    super();
+    this.title = i18n.t(`image.editor.plugin.${this.name}`)
+  }
   name = 'circle'
   iconfont = 'iconfont icon-circle'
-  title = '插入圆圈'
+  title = ''
   params = ['strokeWidth', 'lineType', 'color'] as PluginParamName[]
   defaultParamValue = {
     strokeWidth: 2,

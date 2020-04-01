@@ -3,8 +3,9 @@ import PluginFactory from './plugins/PluginFactory'
 import Palette from './components/Palette'
 import React, { useEffect, useState } from 'react'
 import Toolbar from './components/Toolbar'
-import { PluginParamValue } from './common/type'
+import { PluginParamValue, ITranslate } from './common/type'
 import { EditorContext } from './components/EditorContext'
+import { i18n } from './common/utils'
 
 interface ReactImageEditorProps {
   width?: number;
@@ -17,12 +18,12 @@ interface ReactImageEditorProps {
   src: string;
   getStage?: (stage: any) => void;
   defaultPluginName?: string;
+  t: ITranslate;
 }
 
 export default function ReactImageEditor(props: ReactImageEditorProps) {
   const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null)
-
-
+  i18n.t = props.t;
   const pluginFactory = new PluginFactory()
   const plugins = [...pluginFactory.plugins, ...props.plugins!]
   let defaultPlugin = null
