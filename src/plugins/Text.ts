@@ -56,7 +56,7 @@ export default class Text extends Plugin {
     textarea.style.position = 'absolute'
     textarea.style.left = textNode.x() + 'px'
     textarea.style.top = textNode.y() + 'px'
-    textarea.style.width = textNode.width() + 'px'
+    textarea.style.width = textNode.width() + 20 + 'px'
     textarea.style.height = textNode.height() + 'px'
     textarea.style.lineHeight = String(textNode.lineHeight())
     textarea.style.padding = textNode.padding() + 'px'
@@ -75,7 +75,7 @@ export default class Text extends Plugin {
     textarea.addEventListener('keyup', (e: any) => {
       textNode.text(e.target.value)
       drawLayer.draw()
-      textarea.style.width = textNode.width() + 'px'
+      textarea.style.width = textNode.width() + 20 + 'px'
       textarea.style.height = textNode.height() + 'px'
     })
 
