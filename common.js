@@ -3526,7 +3526,7 @@ function isAncestorFixed(element) {
  * 获得元素的显示部分的区域
  */
 
-function getVisibleRectForElement(element) {
+function getVisibleRectForElement(element, alwaysByViewport) {
   var visibleRect = {
     left: 0,
     right: Infinity,
@@ -3599,7 +3599,7 @@ function getVisibleRectForElement(element) {
     element.style.position = originalPosition;
   }
 
-  if (isAncestorFixed(element)) {
+  if (alwaysByViewport || isAncestorFixed(element)) {
     // Clip by viewport's size.
     visibleRect.left = Math.max(visibleRect.left, scrollX);
     visibleRect.top = Math.max(visibleRect.top, scrollY);
@@ -3789,9 +3789,10 @@ function doAlign(el, tgtRegion, align, isTgtRegionVisible) {
   targetOffset = [].concat(targetOffset);
   overflow = overflow || {};
   var newOverflowCfg = {};
-  var fail = 0; // 当前节点可以被放置的显示区域
+  var fail = 0;
+  var alwaysByViewport = !!(overflow && overflow.alwaysByViewport); // 当前节点可以被放置的显示区域
 
-  var visibleRect = getVisibleRectForElement(source); // 当前节点所占的区域, left/top/width/height
+  var visibleRect = getVisibleRectForElement(source, alwaysByViewport); // 当前节点所占的区域, left/top/width/height
 
   var elRegion = getRegion(source); // 将 offset 转换成数值，支持百分比
 
@@ -3912,8 +3913,8 @@ function doAlign(el, tgtRegion, align, isTgtRegionVisible) {
  *   - 增加智能对齐，以及大小调整选项
  **/
 
-function isOutOfVisibleRect(target) {
-  var visibleRect = getVisibleRectForElement(target);
+function isOutOfVisibleRect(target, alwaysByViewport) {
+  var visibleRect = getVisibleRectForElement(target, alwaysByViewport);
   var targetRegion = getRegion(target);
   return !visibleRect || targetRegion.left + targetRegion.width <= visibleRect.left || targetRegion.top + targetRegion.height <= visibleRect.top || targetRegion.left >= visibleRect.right || targetRegion.top >= visibleRect.bottom;
 }
@@ -3921,7 +3922,7 @@ function isOutOfVisibleRect(target) {
 function alignElement(el, refNode, align) {
   var target = align.target || refNode;
   var refNodeRegion = getRegion(target);
-  var isTargetNotOutOfVisible = !isOutOfVisibleRect(target);
+  var isTargetNotOutOfVisible = !isOutOfVisibleRect(target, align.overflow && align.overflow.alwaysByViewport);
   return doAlign(el, refNodeRegion, align, isTargetNotOutOfVisible);
 }
 
@@ -4194,8 +4195,8 @@ var BaseLayer = (function (_super) {
         var stage = this.getStage();
         if (stage) {
             stage.content.removeChild(this.getCanvas()._canvas);
-            if (index < stage.getChildren().length - 1) {
-                stage.content.insertBefore(this.getCanvas()._canvas, stage.getChildren()[index + 1].getCanvas()._canvas);
+            if (index < stage.children.length - 1) {
+                stage.content.insertBefore(this.getCanvas()._canvas, stage.children[index + 1].getCanvas()._canvas);
             }
             else {
                 stage.content.appendChild(this.getCanvas()._canvas);
@@ -4222,8 +4223,8 @@ var BaseLayer = (function (_super) {
             return false;
         }
         stage.content.removeChild(this.getCanvas()._canvas);
-        if (this.index < stage.getChildren().length - 1) {
-            stage.content.insertBefore(this.getCanvas()._canvas, stage.getChildren()[this.index + 1].getCanvas()._canvas);
+        if (this.index < stage.children.length - 1) {
+            stage.content.insertBefore(this.getCanvas()._canvas, stage.children[this.index + 1].getCanvas()._canvas);
         }
         else {
             stage.content.appendChild(this.getCanvas()._canvas);
@@ -4234,7 +4235,7 @@ var BaseLayer = (function (_super) {
         if (Node_1.Node.prototype.moveDown.call(this)) {
             var stage = this.getStage();
             if (stage) {
-                var children = stage.getChildren();
+                var children = stage.children;
                 stage.content.removeChild(this.getCanvas()._canvas);
                 stage.content.insertBefore(this.getCanvas()._canvas, children[this.index + 1].getCanvas()._canvas);
             }
@@ -4246,7 +4247,7 @@ var BaseLayer = (function (_super) {
         if (Node_1.Node.prototype.moveToBottom.call(this)) {
             var stage = this.getStage();
             if (stage) {
-                var children = stage.getChildren();
+                var children = stage.children;
                 stage.content.removeChild(this.getCanvas()._canvas);
                 stage.content.insertBefore(this.getCanvas()._canvas, children[1].getCanvas()._canvas);
             }
@@ -4435,8 +4436,8 @@ var Canvas = (function () {
         return this.height;
     };
     Canvas.prototype.setSize = function (width, height) {
-        this.setWidth(width);
-        this.setHeight(height);
+        this.setWidth(width || 0);
+        this.setHeight(height || 0);
     };
     Canvas.prototype.toDataURL = function (mimeType, quality) {
         try {
@@ -4447,7 +4448,9 @@ var Canvas = (function () {
                 return this._canvas.toDataURL();
             }
             catch (err) {
-                Util_1.Util.error('Unable to get data URL. ' + err.message);
+                Util_1.Util.error('Unable to get data URL. ' +
+                    err.message +
+                    ' For more info read https://konvajs.org/docs/posts/Tainted_Canvas.html.');
                 return '';
             }
         }
@@ -4569,13 +4572,14 @@ var Container = (function (_super) {
             }
             return this;
         }
-        var child = arguments[0];
+        var child = children[0];
         if (child.getParent()) {
             child.moveTo(this);
             return this;
         }
         var _children = this.children;
         this._validateAdd(child);
+        child._clearCaches();
         child.index = _children.length;
         child.parent = this;
         _children.push(child);
@@ -4945,26 +4949,22 @@ var Context = (function () {
         }
     }
     Context.prototype.fillShape = function (shape) {
-        if (shape.getFillEnabled()) {
+        if (shape.fillEnabled()) {
             this._fill(shape);
         }
     };
     Context.prototype._fill = function (shape) {
     };
     Context.prototype.strokeShape = function (shape) {
-        if (shape.getStrokeEnabled()) {
+        if (shape.hasStroke()) {
             this._stroke(shape);
         }
     };
     Context.prototype._stroke = function (shape) {
     };
     Context.prototype.fillStrokeShape = function (shape) {
-        if (shape.getFillEnabled()) {
-            this._fill(shape);
-        }
-        if (shape.getStrokeEnabled()) {
-            this._stroke(shape);
-        }
+        this.fillShape(shape);
+        this.strokeShape(shape);
     };
     Context.prototype.getTrace = function (relaxed) {
         var traceArr = this.traceArr, len = traceArr.length, str = '', n, trace, method, args;
@@ -5364,6 +5364,11 @@ var HitContext = (function (_super) {
         shape._fillFuncHit(this);
         this.restore();
     };
+    HitContext.prototype.strokeShape = function (shape) {
+        if (shape.hasHitStroke()) {
+            this._stroke(shape);
+        }
+    };
     HitContext.prototype._stroke = function (shape) {
         if (shape.hasHitStroke()) {
             var strokeScaleEnabled = shape.getStrokeScaleEnabled();
@@ -5757,7 +5762,7 @@ exports.glob = typeof global !== 'undefined'
             : {};
 exports.Konva = {
     _global: exports.glob,
-    version: '4.1.2',
+    version: '4.2.2',
     isBrowser: detectBrowser(),
     isUnminified: /param/.test(function (param) { }.toString()),
     dblClickWindow: 400,
@@ -6314,7 +6319,7 @@ var Node = (function () {
                         if (typeof filter !== 'function') {
                             Util_1.Util.error('Filter should be type of function, but got ' +
                                 typeof filter +
-                                ' insted. Please check correct filters');
+                                ' instead. Please check correct filters');
                             continue;
                         }
                         filter.call(this, imageData);
@@ -6322,7 +6327,9 @@ var Node = (function () {
                     }
                 }
                 catch (e) {
-                    Util_1.Util.error('Unable to apply filter. ' + e.message);
+                    Util_1.Util.error('Unable to apply filter. ' +
+                        e.message +
+                        ' This post my help you https://konvajs.org/docs/posts/Tainted_Canvas.html.');
                 }
                 this._filterUpToDate = true;
             }
@@ -6413,12 +6420,16 @@ var Node = (function () {
         this._remove();
         return this;
     };
-    Node.prototype._remove = function () {
-        this._clearSelfAndDescendantCache(STAGE);
+    Node.prototype._clearCaches = function () {
         this._clearSelfAndDescendantCache(ABSOLUTE_TRANSFORM);
+        this._clearSelfAndDescendantCache(ABSOLUTE_OPACITY);
+        this._clearSelfAndDescendantCache(ABSOLUTE_SCALE);
+        this._clearSelfAndDescendantCache(STAGE);
         this._clearSelfAndDescendantCache(VISIBLE);
         this._clearSelfAndDescendantCache(LISTENING);
-        this._clearSelfAndDescendantCache(ABSOLUTE_OPACITY);
+    };
+    Node.prototype._remove = function () {
+        this._clearCaches();
         var parent = this.getParent();
         if (parent && parent.children) {
             parent.children.splice(this.index, 1);
@@ -6936,6 +6947,15 @@ var Node = (function () {
             y: scaleY
         };
     };
+    Node.prototype.getAbsoluteRotation = function () {
+        var parent = this;
+        var rotation = 0;
+        while (parent) {
+            rotation += parent.rotation();
+            parent = parent.getParent();
+        }
+        return rotation;
+    };
     Node.prototype.getTransform = function () {
         return this._getCache(TRANSFORM, this._getTransform);
     };
@@ -6960,10 +6980,6 @@ var Node = (function () {
     };
     Node.prototype.clone = function (obj) {
         var attrs = Util_1.Util.cloneObject(this.attrs), key, allListeners, len, n, listener;
-        for (var i in CLONE_BLACK_LIST) {
-            var blockAttr = CLONE_BLACK_LIST[i];
-            delete attrs[blockAttr];
-        }
         for (key in obj) {
             attrs[key] = obj[key];
         }
@@ -7172,16 +7188,16 @@ var Node = (function () {
         if (!shouldStop) {
             this._fire(eventType, evt);
             var stopBubble = (eventType === MOUSEENTER || eventType === MOUSELEAVE) &&
-                (compareShape &&
-                    compareShape.isAncestorOf &&
-                    compareShape.isAncestorOf(this) &&
-                    !compareShape.isAncestorOf(this.parent));
+                compareShape &&
+                compareShape.isAncestorOf &&
+                compareShape.isAncestorOf(this) &&
+                !compareShape.isAncestorOf(this.parent);
             if (((evt && !evt.cancelBubble) || !evt) &&
                 this.parent &&
                 this.parent.isListening() &&
                 !stopBubble) {
                 if (compareShape && compareShape.parent) {
-                    this._fireAndBubble.call(this.parent, eventType, evt, compareShape.parent);
+                    this._fireAndBubble.call(this.parent, eventType, evt, compareShape);
                 }
                 else {
                     this._fireAndBubble.call(this.parent, eventType, evt);
@@ -7574,11 +7590,11 @@ var Shape = (function (_super) {
     };
     Shape.prototype._hasShadow = function () {
         return (this.shadowEnabled() &&
-            (this.shadowOpacity() !== 0 &&
-                !!(this.shadowColor() ||
-                    this.shadowBlur() ||
-                    this.shadowOffsetX() ||
-                    this.shadowOffsetY())));
+            this.shadowOpacity() !== 0 &&
+            !!(this.shadowColor() ||
+                this.shadowBlur() ||
+                this.shadowOffsetX() ||
+                this.shadowOffsetY()));
     };
     Shape.prototype._getFillPattern = function () {
         return this._getCache(patternImage, this.__getFillPattern);
@@ -7640,10 +7656,11 @@ var Shape = (function (_super) {
         }
     };
     Shape.prototype.hasFill = function () {
-        return !!(this.fill() ||
-            this.fillPatternImage() ||
-            this.fillLinearGradientColorStops() ||
-            this.fillRadialGradientColorStops());
+        return (this.fillEnabled() &&
+            !!(this.fill() ||
+                this.fillPatternImage() ||
+                this.fillLinearGradientColorStops() ||
+                this.fillRadialGradientColorStops()));
     };
     Shape.prototype.hasStroke = function () {
         return (this.strokeEnabled() &&
@@ -7652,8 +7669,10 @@ var Shape = (function (_super) {
     };
     Shape.prototype.hasHitStroke = function () {
         var width = this.hitStrokeWidth();
-        return (this.strokeEnabled() &&
-            (width || this.strokeWidth() && width === 'auto'));
+        if (width === 'auto') {
+            return this.hasStroke();
+        }
+        return this.strokeEnabled() && !!width;
     };
     Shape.prototype.intersects = function (point) {
         var stage = this.getStage(), bufferHitCanvas = stage.bufferHitCanvas, p;
@@ -7677,6 +7696,7 @@ var Shape = (function (_super) {
             this.getStage());
     };
     Shape.prototype.setStrokeHitEnabled = function (val) {
+        Util_1.Util.warn('strokeHitEnabled property is deprecated. Please use hitStrokeWidth instead.');
         if (val) {
             this.hitStrokeWidth('auto');
         }
@@ -7695,8 +7715,8 @@ var Shape = (function (_super) {
     Shape.prototype.getSelfRect = function () {
         var size = this.size();
         return {
-            x: this._centroid ? Math.round(-size.width / 2) : 0,
-            y: this._centroid ? Math.round(-size.height / 2) : 0,
+            x: this._centroid ? -size.width / 2 : 0,
+            y: this._centroid ? -size.height / 2 : 0,
             width: size.width,
             height: size.height
         };
@@ -8095,6 +8115,9 @@ var Stage = (function (_super) {
         }
     };
     Stage.prototype._checkVisibility = function () {
+        if (!this.content) {
+            return;
+        }
         var style = this.visible() ? '' : 'none';
         this.content.style.display = style;
     };
@@ -8212,18 +8235,18 @@ var Stage = (function (_super) {
         return null;
     };
     Stage.prototype._resizeDOM = function () {
+        var width = this.width();
+        var height = this.height();
         if (this.content) {
-            var width = this.width(), height = this.height(), layers = this.getChildren(), len = layers.length, n, layer;
             this.content.style.width = width + PX;
             this.content.style.height = height + PX;
-            this.bufferCanvas.setSize(width, height);
-            this.bufferHitCanvas.setSize(width, height);
-            for (n = 0; n < len; n++) {
-                layer = layers[n];
-                layer.setSize({ width: width, height: height });
-                layer.draw();
-            }
         }
+        this.bufferCanvas.setSize(width, height);
+        this.bufferHitCanvas.setSize(width, height);
+        this.children.each(function (layer) {
+            layer.setSize({ width: width, height: height });
+            layer.draw();
+        });
     };
     Stage.prototype.add = function (layer) {
         if (arguments.length > 1) {
@@ -8716,19 +8739,32 @@ var Stage = (function (_super) {
         this.setPointersPositions(evt);
     };
     Stage.prototype._getContentPosition = function () {
-        var rect = this.content.getBoundingClientRect
-            ? this.content.getBoundingClientRect()
-            : { top: 0, left: 0, width: 1000, height: 1000 };
+        if (!this.content || !this.content.getBoundingClientRect) {
+            return {
+                top: 0,
+                left: 0,
+                scaleX: 1,
+                scaleY: 1
+            };
+        }
+        var rect = this.content.getBoundingClientRect();
         return {
             top: rect.top,
             left: rect.left,
             scaleX: rect.width / this.content.clientWidth || 1,
-            scaleY: rect.height / this.content.clientHeight || 1,
+            scaleY: rect.height / this.content.clientHeight || 1
         };
     };
     Stage.prototype._buildDOM = function () {
-        this.bufferCanvas = new Canvas_1.SceneCanvas();
-        this.bufferHitCanvas = new Canvas_1.HitCanvas({ pixelRatio: 1 });
+        this.bufferCanvas = new Canvas_1.SceneCanvas({
+            width: this.width(),
+            height: this.height()
+        });
+        this.bufferHitCanvas = new Canvas_1.HitCanvas({
+            pixelRatio: 1,
+            width: this.width(),
+            height: this.height()
+        });
         if (!Global_1.Konva.isBrowser) {
             return;
         }
@@ -12313,7 +12349,7 @@ var Arrow = (function (_super) {
             x: lineRect.x - offset,
             y: lineRect.y - offset,
             width: lineRect.width + offset * 2,
-            height: lineRect.height + offset * 2,
+            height: lineRect.height + offset * 2
         };
     };
     return Arrow;
@@ -12931,7 +12967,7 @@ var Line = (function (_super) {
                 points[1]
             ], this._getTensionPoints(), [
                 points[points.length - 2],
-                points[points.length - 2]
+                points[points.length - 1]
             ]);
         }
         else {
@@ -12951,10 +12987,10 @@ var Line = (function (_super) {
             maxY = Math.max(maxY, y);
         }
         return {
-            x: Math.round(minX),
-            y: Math.round(minY),
-            width: Math.round(maxX - minX),
-            height: Math.round(maxY - minY)
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
         };
     };
     return Line;
@@ -13022,6 +13058,7 @@ var Path = (function (_super) {
     Path.prototype._sceneFunc = function (context) {
         var ca = this.dataArray;
         context.beginPath();
+        var isClosed = false;
         for (var n = 0; n < ca.length; n++) {
             var c = ca[n].command;
             var p = ca[n].points;
@@ -13052,22 +13089,47 @@ var Path = (function (_super) {
                     context.translate(-cx, -cy);
                     break;
                 case 'z':
+                    isClosed = true;
                     context.closePath();
                     break;
             }
         }
-        context.fillStrokeShape(this);
+        if (!isClosed && !this.hasFill()) {
+            context.strokeShape(this);
+        }
+        else {
+            context.fillStrokeShape(this);
+        }
     };
     Path.prototype.getSelfRect = function () {
         var points = [];
         this.dataArray.forEach(function (data) {
             if (data.command === 'A') {
-                points = points.concat([
-                    data.points[0] - data.points[2],
-                    data.points[1] - data.points[3],
-                    data.points[0] + data.points[2],
-                    data.points[1] + data.points[3]
-                ]);
+                var start = data.points[4];
+                var dTheta = data.points[5];
+                var end = data.points[4] + dTheta;
+                var inc = Math.PI / 180.0;
+                if (Math.abs(start - end) < inc) {
+                    inc = Math.abs(start - end);
+                }
+                if (dTheta < 0) {
+                    for (var t = start - inc; t > end; t -= inc) {
+                        var point = Path.getPointOnEllipticalArc(data.points[0], data.points[1], data.points[2], data.points[3], t, 0);
+                        points.push(point.x, point.y);
+                    }
+                }
+                else {
+                    for (var t = start + inc; t < end; t += inc) {
+                        var point = Path.getPointOnEllipticalArc(data.points[0], data.points[1], data.points[2], data.points[3], t, 0);
+                        points.push(point.x, point.y);
+                    }
+                }
+            }
+            else if (data.command === 'C') {
+                for (var t = 0.0; t <= 1; t += 0.01) {
+                    var point = Path.getPointOnCubicBezier(t, data.start.x, data.start.y, data.points[0], data.points[1], data.points[2], data.points[3], data.points[4], data.points[5]);
+                    points.push(point.x, point.y);
+                }
             }
             else {
                 points = points.concat(data.points);
@@ -14102,9 +14164,10 @@ function checkDefaultFill(config) {
     }
     return config;
 }
-var trimRight = String.prototype.trimRight || function polyfill() {
-    return this.replace(/[\s\xa0]+$/, '');
-};
+var trimRight = String.prototype.trimRight ||
+    function polyfill() {
+        return this.replace(/[\s\xa0]+$/, '');
+    };
 var Text = (function (_super) {
     __extends(Text, _super);
     function Text(config) {
@@ -14211,7 +14274,11 @@ var Text = (function (_super) {
         context.fillStrokeShape(this);
     };
     Text.prototype.setText = function (text) {
-        var str = Util_1.Util._isString(text) ? text : (text === null || text === undefined) ? '' : text + '';
+        var str = Util_1.Util._isString(text)
+            ? text
+            : text === null || text === undefined
+                ? ''
+                : text + '';
         this._setAttr(TEXT, str);
         return this;
     };
@@ -14735,10 +14802,10 @@ var TextPath = (function (_super) {
         }
         var fontSize = this.fontSize();
         return {
-            x: Math.round(minX) - fontSize / 2,
-            y: Math.round(minY) - fontSize / 2,
-            width: Math.round(maxX - minX) + fontSize,
-            height: Math.round(maxY - minY) + fontSize
+            x: minX - fontSize / 2,
+            y: minY - fontSize / 2,
+            width: maxX - minX + fontSize,
+            height: maxY - minY + fontSize
         };
     };
     return TextPath;
@@ -14943,6 +15010,9 @@ var Transformer = (function (_super) {
     Transformer.prototype.getNode = function () {
         return this._node;
     };
+    Transformer.prototype.getActiveAnchor = function () {
+        return this._movingAnchorName;
+    };
     Transformer.prototype.detach = function () {
         if (this.getNode()) {
             this.getNode().off('.' + EVENTS_NAME);
@@ -15035,7 +15105,7 @@ var Transformer = (function (_super) {
             e.cancelBubble = true;
         });
         anchor.on('mouseenter', function () {
-            var rad = Global_1.Konva.getAngle(_this.rotation());
+            var rad = Global_1.Konva.getAngle(_this.getAbsoluteRotation());
             var scale = _this.getNode().getAbsoluteScale();
             var isMirrored = scale.y * scale.x < 0;
             var cursor = getCursor(name, rad, isMirrored);
@@ -15084,27 +15154,15 @@ var Transformer = (function (_super) {
         window.addEventListener('mouseup', this._handleMouseUp, true);
         window.addEventListener('touchend', this._handleMouseUp, true);
         this._transforming = true;
-        this._fire('transformstart', { evt: e });
-        this.getNode()._fire('transformstart', { evt: e });
+        this._fire('transformstart', { evt: e, target: this.getNode() });
+        this.getNode()._fire('transformstart', { evt: e, target: this.getNode() });
     };
     Transformer.prototype._handleMouseMove = function (e) {
         var x, y, newHypotenuse;
         var anchorNode = this.findOne('.' + this._movingAnchorName);
         var stage = anchorNode.getStage();
-        var box = stage.getContent().getBoundingClientRect();
-        var zeroPoint = {
-            x: box.left,
-            y: box.top
-        };
-        var pointerPos = {
-            left: e.clientX !== undefined ? e.clientX : e.touches[0].clientX,
-            top: e.clientX !== undefined ? e.clientY : e.touches[0].clientY
-        };
-        var newAbsPos = {
-            x: pointerPos.left - zeroPoint.x,
-            y: pointerPos.top - zeroPoint.y
-        };
-        anchorNode.setAbsolutePosition(newAbsPos);
+        stage.setPointersPositions(e);
+        anchorNode.setAbsolutePosition(stage.getPointerPosition());
         var keepProportion = this.keepRatio() || e.shiftKey;
         var padding = this.padding();
         if (this._movingAnchorName === 'top-left') {
@@ -15202,7 +15260,7 @@ var Transformer = (function (_super) {
             var alpha = Global_1.Konva.getAngle(this.getNode().rotation());
             var newAlpha = Util_1.Util._degToRad(newRotation);
             var snaps = this.rotationSnaps();
-            var offset = 0.1;
+            var offset = Global_1.Konva.getAngle(this.rotationSnapTolerance());
             for (var i = 0; i < snaps.length; i++) {
                 var angle = Global_1.Konva.getAngle(snaps[i]);
                 var dif = Math.abs(angle - Util_1.Util._degToRad(newRotation)) % (Math.PI * 2);
@@ -15277,11 +15335,12 @@ var Transformer = (function (_super) {
             window.removeEventListener('touchmove', this._handleMouseMove);
             window.removeEventListener('mouseup', this._handleMouseUp, true);
             window.removeEventListener('touchend', this._handleMouseUp, true);
-            this._fire('transformend', { evt: e });
             var node = this.getNode();
+            this._fire('transformend', { evt: e, target: node });
             if (node) {
-                node.fire('transformend', { evt: e });
+                node.fire('transformend', { evt: e, target: node });
             }
+            this._movingAnchorName = null;
         }
     };
     Transformer.prototype._fitNodeInto = function (newAttrs, evt) {
@@ -15313,8 +15372,8 @@ var Transformer = (function (_super) {
             x: newAttrs.x - (dx * Math.cos(rotation) + dy * Math.sin(-rotation)),
             y: newAttrs.y - (dy * Math.cos(rotation) + dx * Math.sin(rotation))
         });
-        this._fire('transform', { evt: evt });
-        this.getNode()._fire('transform', { evt: evt });
+        this._fire('transform', { evt: evt, target: this.getNode() });
+        this.getNode()._fire('transform', { evt: evt, target: this.getNode() });
         this.update();
         this.getLayer().batchDraw();
     };
@@ -15468,6 +15527,7 @@ Factory_1.Factory.addGetterSetter(Transformer, 'anchorSize', 10, Validators_1.ge
 Factory_1.Factory.addGetterSetter(Transformer, 'rotateEnabled', true);
 Factory_1.Factory.addGetterSetter(Transformer, 'rotationSnaps', []);
 Factory_1.Factory.addGetterSetter(Transformer, 'rotateAnchorOffset', 50, Validators_1.getNumberValidator());
+Factory_1.Factory.addGetterSetter(Transformer, 'rotationSnapTolerance', 5, Validators_1.getNumberValidator());
 Factory_1.Factory.addGetterSetter(Transformer, 'borderEnabled', true);
 Factory_1.Factory.addGetterSetter(Transformer, 'anchorStroke', 'rgb(0, 161, 255)');
 Factory_1.Factory.addGetterSetter(Transformer, 'anchorStrokeWidth', 1, Validators_1.getNumberValidator());
@@ -17983,7 +18043,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _Content__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./Content */ "./node_modules/rc-tooltip/es/Content.js");
 function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); if (enumerableOnly) symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; }); keys.push.apply(keys, symbols); } return keys; }
 
-function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; if (i % 2) { ownKeys(source, true).forEach(function (key) { _defineProperty(target, key, source[key]); }); } else if (Object.getOwnPropertyDescriptors) { Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)); } else { ownKeys(source).forEach(function (key) { Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)); }); } } return target; }
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; if (i % 2) { ownKeys(Object(source), true).forEach(function (key) { _defineProperty(target, key, source[key]); }); } else if (Object.getOwnPropertyDescriptors) { Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)); } else { ownKeys(Object(source)).forEach(function (key) { Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)); }); } } return target; }
 
 function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
 
@@ -18379,7 +18439,7 @@ function (_Component) {
         }
       }
 
-      var mergedStyle = _objectSpread({}, sizeStyle, {}, style, {}, _this.getZIndexStyle(), {
+      var mergedStyle = _objectSpread({}, sizeStyle, {}, _this.getZIndexStyle(), {}, style, {
         opacity: status === 'stable' || !visible ? undefined : 0
       }); // ================= Motions =================
 
@@ -19389,9 +19449,13 @@ function generateTrigger(PortalComponent) {
           newChildProps.className = childrenClassName;
         }
 
-        var trigger = react__WEBPACK_IMPORTED_MODULE_0___default.a.cloneElement(child, _objectSpread({}, newChildProps, {
-          ref: Object(rc_util_es_ref__WEBPACK_IMPORTED_MODULE_4__["composeRef"])(this.triggerRef, child.ref)
-        }));
+        var cloneProps = _objectSpread({}, newChildProps);
+
+        if (Object(rc_util_es_ref__WEBPACK_IMPORTED_MODULE_4__["supportRef"])(child)) {
+          cloneProps.ref = Object(rc_util_es_ref__WEBPACK_IMPORTED_MODULE_4__["composeRef"])(this.triggerRef, child.ref);
+        }
+
+        var trigger = react__WEBPACK_IMPORTED_MODULE_0___default.a.cloneElement(child, cloneProps);
         var portal; // prevent unmounting after it's rendered
 
         if (popupVisible || this.popupRef.current || forceRender) {
@@ -19633,7 +19697,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var prop_types__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! prop-types */ "./node_modules/prop-types/index.js");
 /* harmony import */ var prop_types__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(prop_types__WEBPACK_IMPORTED_MODULE_2__);
-function _typeof(obj) { if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
@@ -19641,9 +19705,13 @@ function _defineProperties(target, props) { for (var i = 0; i < props.length; i+
 
 function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
 
+function _createSuper(Derived) { return function () { var Super = _getPrototypeOf(Derived), result; if (_isNativeReflectConstruct()) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
+
 function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) === "object" || typeof call === "function")) { return call; } return _assertThisInitialized(self); }
 
 function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
+
+function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Date.prototype.toString.call(Reflect.construct(Date, [], function () {})); return true; } catch (e) { return false; } }
 
 function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
 
@@ -19655,15 +19723,15 @@ function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || func
 
 
 
-var Portal =
-/*#__PURE__*/
-function (_React$Component) {
+var Portal = /*#__PURE__*/function (_React$Component) {
   _inherits(Portal, _React$Component);
+
+  var _super = _createSuper(Portal);
 
   function Portal() {
     _classCallCheck(this, Portal);
 
-    return _possibleConstructorReturn(this, _getPrototypeOf(Portal).apply(this, arguments));
+    return _super.apply(this, arguments);
   }
 
   _createClass(Portal, [{
@@ -19733,7 +19801,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "fillRef", function() { return fillRef; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "composeRef", function() { return composeRef; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "supportRef", function() { return supportRef; });
-function _typeof(obj) { if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
 
 function fillRef(ref, node) {
   if (typeof ref === 'function') {
@@ -44851,7 +44919,7 @@ if (false) {} else {
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
-/** @license React v16.12.0
+/** @license React v16.13.1
  * react-is.development.js
  *
  * Copyright (c) Facebook, Inc. and its affiliates.
@@ -44867,8 +44935,6 @@ if (false) {} else {
 if (true) {
   (function() {
 'use strict';
-
-Object.defineProperty(exports, '__esModule', { value: true });
 
 // The Symbol used to tag the ReactElement-like types. If there is no native Symbol
 // nor polyfill, then a plain number is used for performance.
@@ -44889,69 +44955,15 @@ var REACT_SUSPENSE_TYPE = hasSymbol ? Symbol.for('react.suspense') : 0xead1;
 var REACT_SUSPENSE_LIST_TYPE = hasSymbol ? Symbol.for('react.suspense_list') : 0xead8;
 var REACT_MEMO_TYPE = hasSymbol ? Symbol.for('react.memo') : 0xead3;
 var REACT_LAZY_TYPE = hasSymbol ? Symbol.for('react.lazy') : 0xead4;
+var REACT_BLOCK_TYPE = hasSymbol ? Symbol.for('react.block') : 0xead9;
 var REACT_FUNDAMENTAL_TYPE = hasSymbol ? Symbol.for('react.fundamental') : 0xead5;
 var REACT_RESPONDER_TYPE = hasSymbol ? Symbol.for('react.responder') : 0xead6;
 var REACT_SCOPE_TYPE = hasSymbol ? Symbol.for('react.scope') : 0xead7;
 
 function isValidElementType(type) {
   return typeof type === 'string' || typeof type === 'function' || // Note: its typeof might be other than 'symbol' or 'number' if it's a polyfill.
-  type === REACT_FRAGMENT_TYPE || type === REACT_CONCURRENT_MODE_TYPE || type === REACT_PROFILER_TYPE || type === REACT_STRICT_MODE_TYPE || type === REACT_SUSPENSE_TYPE || type === REACT_SUSPENSE_LIST_TYPE || typeof type === 'object' && type !== null && (type.$$typeof === REACT_LAZY_TYPE || type.$$typeof === REACT_MEMO_TYPE || type.$$typeof === REACT_PROVIDER_TYPE || type.$$typeof === REACT_CONTEXT_TYPE || type.$$typeof === REACT_FORWARD_REF_TYPE || type.$$typeof === REACT_FUNDAMENTAL_TYPE || type.$$typeof === REACT_RESPONDER_TYPE || type.$$typeof === REACT_SCOPE_TYPE);
+  type === REACT_FRAGMENT_TYPE || type === REACT_CONCURRENT_MODE_TYPE || type === REACT_PROFILER_TYPE || type === REACT_STRICT_MODE_TYPE || type === REACT_SUSPENSE_TYPE || type === REACT_SUSPENSE_LIST_TYPE || typeof type === 'object' && type !== null && (type.$$typeof === REACT_LAZY_TYPE || type.$$typeof === REACT_MEMO_TYPE || type.$$typeof === REACT_PROVIDER_TYPE || type.$$typeof === REACT_CONTEXT_TYPE || type.$$typeof === REACT_FORWARD_REF_TYPE || type.$$typeof === REACT_FUNDAMENTAL_TYPE || type.$$typeof === REACT_RESPONDER_TYPE || type.$$typeof === REACT_SCOPE_TYPE || type.$$typeof === REACT_BLOCK_TYPE);
 }
-
-/**
- * Forked from fbjs/warning:
- * https://github.com/facebook/fbjs/blob/e66ba20ad5be433eb54423f2b097d829324d9de6/packages/fbjs/src/__forks__/warning.js
- *
- * Only change is we use console.warn instead of console.error,
- * and do nothing when 'console' is not supported.
- * This really simplifies the code.
- * ---
- * Similar to invariant but only logs a warning if the condition is not met.
- * This can be used to log issues in development environments in critical
- * paths. Removing the logging code for production environments will keep the
- * same logic and follow the same code paths.
- */
-var lowPriorityWarningWithoutStack = function () {};
-
-{
-  var printWarning = function (format) {
-    for (var _len = arguments.length, args = new Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
-      args[_key - 1] = arguments[_key];
-    }
-
-    var argIndex = 0;
-    var message = 'Warning: ' + format.replace(/%s/g, function () {
-      return args[argIndex++];
-    });
-
-    if (typeof console !== 'undefined') {
-      console.warn(message);
-    }
-
-    try {
-      // --- Welcome to debugging React ---
-      // This error was thrown as a convenience so that you can use this stack
-      // to find the callsite that caused this warning to fire.
-      throw new Error(message);
-    } catch (x) {}
-  };
-
-  lowPriorityWarningWithoutStack = function (condition, format) {
-    if (format === undefined) {
-      throw new Error('`lowPriorityWarningWithoutStack(condition, format, ...args)` requires a warning ' + 'message argument');
-    }
-
-    if (!condition) {
-      for (var _len2 = arguments.length, args = new Array(_len2 > 2 ? _len2 - 2 : 0), _key2 = 2; _key2 < _len2; _key2++) {
-        args[_key2 - 2] = arguments[_key2];
-      }
-
-      printWarning.apply(void 0, [format].concat(args));
-    }
-  };
-}
-
-var lowPriorityWarningWithoutStack$1 = lowPriorityWarningWithoutStack;
 
 function typeOf(object) {
   if (typeof object === 'object' && object !== null) {
@@ -45013,8 +45025,9 @@ var hasWarnedAboutDeprecatedIsAsyncMode = false; // AsyncMode should be deprecat
 function isAsyncMode(object) {
   {
     if (!hasWarnedAboutDeprecatedIsAsyncMode) {
-      hasWarnedAboutDeprecatedIsAsyncMode = true;
-      lowPriorityWarningWithoutStack$1(false, 'The ReactIs.isAsyncMode() alias has been deprecated, ' + 'and will be removed in React 17+. Update your code to use ' + 'ReactIs.isConcurrentMode() instead. It has the exact same API.');
+      hasWarnedAboutDeprecatedIsAsyncMode = true; // Using console['warn'] to evade Babel and ESLint
+
+      console['warn']('The ReactIs.isAsyncMode() alias has been deprecated, ' + 'and will be removed in React 17+. Update your code to use ' + 'ReactIs.isConcurrentMode() instead. It has the exact same API.');
     }
   }
 
@@ -45057,7 +45070,6 @@ function isSuspense(object) {
   return typeOf(object) === REACT_SUSPENSE_TYPE;
 }
 
-exports.typeOf = typeOf;
 exports.AsyncMode = AsyncMode;
 exports.ConcurrentMode = ConcurrentMode;
 exports.ContextConsumer = ContextConsumer;
@@ -45071,7 +45083,6 @@ exports.Portal = Portal;
 exports.Profiler = Profiler;
 exports.StrictMode = StrictMode;
 exports.Suspense = Suspense;
-exports.isValidElementType = isValidElementType;
 exports.isAsyncMode = isAsyncMode;
 exports.isConcurrentMode = isConcurrentMode;
 exports.isContextConsumer = isContextConsumer;
@@ -45085,6 +45096,8 @@ exports.isPortal = isPortal;
 exports.isProfiler = isProfiler;
 exports.isStrictMode = isStrictMode;
 exports.isSuspense = isSuspense;
+exports.isValidElementType = isValidElementType;
+exports.typeOf = typeOf;
   })();
 }
 
@@ -49559,15 +49572,21 @@ var transformerStyle = {
 /*!*****************************!*\
   !*** ./src/common/utils.ts ***!
   \*****************************/
-/*! exports provided: uuid */
+/*! exports provided: uuid, i18n */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "uuid", function() { return uuid; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "i18n", function() { return i18n; });
 function uuid() {
   return '_' + Math.random().toString(36).substr(2, 9);
 }
+var i18n = {
+  t: function t(key) {
+    return '';
+  }
+};
 
 /***/ }),
 
@@ -49786,7 +49805,7 @@ var Palette = /*#__PURE__*/function (_React$Component) {
 
       stage.clearAndToCanvas = function (config) {
         var currentPlugin = _this.props.currentPlugin;
-        currentPlugin && currentPlugin.onLeave && currentPlugin.onLeave(_this.getDrawEventPramas(null));
+        currentPlugin && currentPlugin.onLeave && currentPlugin.onLeave(_this.getDrawEventParams(null));
         return stage.toCanvas(config);
       };
 
@@ -49815,7 +49834,7 @@ var Palette = /*#__PURE__*/function (_React$Component) {
             if (plugins[i].shapeName && plugins[i].shapeName === name && (!currentPlugin || !currentPlugin.shapeName || name !== currentPlugin.shapeName)) {
               (function (event) {
                 setTimeout(function () {
-                  plugins[i].onClick && plugins[i].onClick(_this.getDrawEventPramas(event));
+                  plugins[i].onClick && plugins[i].onClick(_this.getDrawEventParams(event));
                 });
               })(e);
 
@@ -49834,25 +49853,25 @@ var Palette = /*#__PURE__*/function (_React$Component) {
         }
 
         if (currentPlugin && currentPlugin.onClick) {
-          currentPlugin.onClick(_this.getDrawEventPramas(e));
+          currentPlugin.onClick(_this.getDrawEventParams(e));
         }
       });
 
       _this.stage.on('mousedown touchstart', function (e) {
         if (currentPlugin && currentPlugin.onDrawStart) {
-          currentPlugin.onDrawStart(_this.getDrawEventPramas(e));
+          currentPlugin.onDrawStart(_this.getDrawEventParams(e));
         }
       });
 
       _this.stage.on('mousemove touchmove', function (e) {
         if (currentPlugin && currentPlugin.onDraw) {
-          currentPlugin.onDraw(_this.getDrawEventPramas(e));
+          currentPlugin.onDraw(_this.getDrawEventParams(e));
         }
       });
 
       _this.stage.on('mouseup touchend', function (e) {
         if (currentPlugin && currentPlugin.onDrawEnd) {
-          currentPlugin.onDrawEnd(_this.getDrawEventPramas(e));
+          currentPlugin.onDrawEnd(_this.getDrawEventParams(e));
         }
       });
     };
@@ -49915,9 +49934,9 @@ var Palette = /*#__PURE__*/function (_React$Component) {
     }; // 生命周期的统一参数生成函数
 
 
-    _this.getDrawEventPramas = function (e) {
+    _this.getDrawEventParams = function (e) {
       var props = _this.props;
-      var drawEventPramas = {
+      var drawEventParams = {
         event: e,
         stage: _this.stage,
         imageLayer: _this.imageLayer,
@@ -49939,7 +49958,7 @@ var Palette = /*#__PURE__*/function (_React$Component) {
         toolbarItemConfig: props.toolbarItemConfig,
         updateToolbarItemConfig: props.updateToolbarItemConfig
       };
-      return drawEventPramas;
+      return drawEventParams;
     };
 
     var containerWidth = props.containerWidth,
@@ -49967,7 +49986,7 @@ var Palette = /*#__PURE__*/function (_React$Component) {
       var currentPlugin = this.props.currentPlugin;
 
       if (currentPlugin && currentPlugin.onEnter) {
-        currentPlugin.onEnter(this.getDrawEventPramas(null));
+        currentPlugin.onEnter(this.getDrawEventParams(null));
       }
     }
   }, {
@@ -49981,12 +50000,12 @@ var Palette = /*#__PURE__*/function (_React$Component) {
           this.bindEvents();
 
           if (currentPlugin.onEnter) {
-            currentPlugin.onEnter(this.getDrawEventPramas(null));
+            currentPlugin.onEnter(this.getDrawEventParams(null));
           }
         }
 
         if (prevCurrentPlugin && prevCurrentPlugin.onLeave) {
-          prevCurrentPlugin.onLeave(this.getDrawEventPramas(null));
+          prevCurrentPlugin.onLeave(this.getDrawEventParams(null));
         }
       }
     }
@@ -49994,7 +50013,7 @@ var Palette = /*#__PURE__*/function (_React$Component) {
     key: "componentWillUnmount",
     value: function componentWillUnmount() {
       var currentPlugin = this.props.currentPlugin;
-      currentPlugin && currentPlugin.onLeave && currentPlugin.onLeave(this.getDrawEventPramas(null));
+      currentPlugin && currentPlugin.onLeave && currentPlugin.onLeave(this.getDrawEventParams(null));
     }
   }, {
     key: "render",
@@ -50073,6 +50092,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! react */ "./node_modules/react/index.js");
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var _common_constants__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../../common/constants */ "./src/common/constants.ts");
+/* harmony import */ var _common_utils__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../../common/utils */ "./src/common/utils.ts");
+
 
 
 function FontSizeSetting(props) {
@@ -50085,17 +50106,17 @@ function FontSizeSetting(props) {
     onClick: function onClick() {
       return props.onChange(12);
     }
-  }, "\u5C0F"), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+  }, _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t('image.editor.font.size.small')), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
     className: "".concat(_common_constants__WEBPACK_IMPORTED_MODULE_1__["prefixCls"], "-font-size ").concat(props.value === 16 ? _common_constants__WEBPACK_IMPORTED_MODULE_1__["prefixCls"] + '-font-size-activated' : ''),
     onClick: function onClick() {
       return props.onChange(16);
     }
-  }, "\u4E2D"), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+  }, _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t('image.editor.font.size.medium')), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
     className: "".concat(_common_constants__WEBPACK_IMPORTED_MODULE_1__["prefixCls"], "-font-size ").concat(props.value === 20 ? _common_constants__WEBPACK_IMPORTED_MODULE_1__["prefixCls"] + '-font-size-activated' : ''),
     onClick: function onClick() {
       return props.onChange(20);
     }
-  }, "\u5927"));
+  }, _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t('image.editor.font.size.big')));
 }
 
 /***/ }),
@@ -50193,7 +50214,7 @@ function _extends() { _extends = Object.assign || function (target) { for (var i
 
 
 function ParamSetting(props) {
-  function handleStrokWidthChange(strokeWidth) {
+  function handleStrokeWidthChange(strokeWidth) {
     props.onChange(_extends(_extends({}, props.paramValue), {
       strokeWidth: strokeWidth
     }));
@@ -50223,7 +50244,7 @@ function ParamSetting(props) {
         return react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement(_StrokeWidthSetting__WEBPACK_IMPORTED_MODULE_4__["default"], {
           key: "stroke-width-setting",
           value: props.paramValue ? props.paramValue['strokeWidth'] : undefined,
-          onChange: handleStrokWidthChange
+          onChange: handleStrokeWidthChange
         });
 
       case 'lineType':
@@ -50346,9 +50367,10 @@ function Toolbar() {
   return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("div", {
     className: "".concat(_common_constants__WEBPACK_IMPORTED_MODULE_3__["prefixCls"], "-toolbar"),
     style: style
-  }, toolbar.items.map(function (item) {
+  }, toolbar.items.map(function (item, index) {
     if (item === '|') return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("span", {
-      className: "".concat(_common_constants__WEBPACK_IMPORTED_MODULE_3__["prefixCls"], "-toolbar-seperator")
+      key: index,
+      className: "".concat(_common_constants__WEBPACK_IMPORTED_MODULE_3__["prefixCls"], "-toolbar-separator")
     });
 
     for (var i = 0; i < plugins.length; i++) {
@@ -50379,6 +50401,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
 /* harmony import */ var _components_Toolbar__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ./components/Toolbar */ "./src/components/Toolbar.tsx");
 /* harmony import */ var _components_EditorContext__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ./components/EditorContext */ "./src/components/EditorContext.tsx");
+/* harmony import */ var _common_utils__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./common/utils */ "./src/common/utils.ts");
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
@@ -50406,23 +50429,25 @@ function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
 
 
 
+
 function ReactImageEditor(props) {
   var _useState = Object(react__WEBPACK_IMPORTED_MODULE_2__["useState"])(null),
       _useState2 = _slicedToArray(_useState, 2),
       imageObj = _useState2[0],
       setImageObj = _useState2[1];
 
+  _common_utils__WEBPACK_IMPORTED_MODULE_5__["i18n"].t = props.t;
   var pluginFactory = new _plugins_PluginFactory__WEBPACK_IMPORTED_MODULE_0__["default"]();
   var plugins = [].concat(_toConsumableArray(pluginFactory.plugins), _toConsumableArray(props.plugins));
   var defaultPlugin = null;
-  var defalutParamValue = {};
+  var defaultParamValue = {};
 
   for (var i = 0; i < plugins.length; i++) {
     if (props.defaultPluginName && props.toolbar && plugins[i].name === props.defaultPluginName) {
       defaultPlugin = plugins[i];
 
-      if (defaultPlugin.defalutParamValue) {
-        defalutParamValue = defaultPlugin.defalutParamValue;
+      if (defaultPlugin.defaultParamValue) {
+        defaultParamValue = defaultPlugin.defaultParamValue;
       }
 
       break;
@@ -50434,7 +50459,7 @@ function ReactImageEditor(props) {
       currentPlugin = _useState4[0],
       setCurrentPlugin = _useState4[1];
 
-  var _useState5 = Object(react__WEBPACK_IMPORTED_MODULE_2__["useState"])(defalutParamValue),
+  var _useState5 = Object(react__WEBPACK_IMPORTED_MODULE_2__["useState"])(defaultParamValue),
       _useState6 = _slicedToArray(_useState5, 2),
       paramValue = _useState6[0],
       setParamValue = _useState6[1]; // 生成默认 toolbarItemConfig
@@ -50471,7 +50496,7 @@ function ReactImageEditor(props) {
 
   function handlePluginChange(plugin) {
     setCurrentPlugin(plugin);
-    plugin.defalutParamValue && setParamValue(plugin.defalutParamValue);
+    plugin.defaultParamValue && setParamValue(plugin.defaultParamValue);
 
     if (!plugin.params) {
       setTimeout(function () {
@@ -50575,12 +50600,12 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Arrow);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'arrow';
     _this.iconfont = 'iconfont icon-arrow';
     _this.title = '插入箭头';
     _this.params = ['strokeWidth', 'color'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       strokeWidth: 2,
       lineType: 'solid',
       color: '#F5222D'
@@ -50593,9 +50618,9 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
     _this.started = false;
     _this.startPoints = [0, 0];
 
-    _this.enableTransform = function (drawEventPramas, node) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.enableTransform = function (drawEventParams, node) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
 
       if (!_this.transformer) {
         _this.transformer = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Transformer(_extends(_extends({}, _common_constants__WEBPACK_IMPORTED_MODULE_2__["transformerStyle"]), {
@@ -50618,10 +50643,10 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.disableTransform = function (drawEventPramas, node, remove) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          pubSub = drawEventPramas.pubSub;
+    _this.disableTransform = function (drawEventParams, node, remove) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          pubSub = drawEventParams.pubSub;
 
       if (_this.transformer) {
         _this.transformer.remove();
@@ -50647,36 +50672,36 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.onEnter = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.onEnter = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
       var container = stage.container();
       container.tabIndex = 1; // make it focusable
 
       container.focus();
       container.addEventListener('keyup', function (e) {
         if (e.key === 'Backspace' && _this.selectedNode) {
-          _this.disableTransform(drawEventPramas, _this.selectedNode, true);
+          _this.disableTransform(drawEventParams, _this.selectedNode, true);
 
           drawLayer.draw();
         }
       });
     };
 
-    _this.onClick = function (drawEventPramas) {
-      var event = drawEventPramas.event;
+    _this.onClick = function (drawEventParams) {
+      var event = drawEventParams.event;
 
       if (event.target.name && event.target.name() === 'arrow') {
         // 之前没有选中节点或者在相同节点之间切换点击
         if (!_this.selectedNode || _this.selectedNode._id !== event.target._id) {
-          _this.selectedNode && _this.disableTransform(drawEventPramas, _this.selectedNode);
+          _this.selectedNode && _this.disableTransform(drawEventParams, _this.selectedNode);
 
-          _this.enableTransform(drawEventPramas, event.target);
+          _this.enableTransform(drawEventParams, event.target);
 
           _this.selectedNode = event.target;
         }
       } else {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
       }
     };
 
@@ -50684,22 +50709,22 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = true;
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue,
-          pubSub = drawEventPramas.pubSub;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue,
+          pubSub = drawEventParams.pubSub;
       var pos = stage.getPointerPosition();
       if (!_this.isPaint || _this.transformer || !pos) return;
 
       if (!_this.started && pos) {
         _this.startPoints = [pos.x, pos.y];
-        var strokeColor = paramValue && paramValue.color ? paramValue.color : _this.defalutParamValue.color;
+        var strokeColor = paramValue && paramValue.color ? paramValue.color : _this.defaultParamValue.color;
         _this.lastArrow = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Arrow({
           id: Object(_common_utils__WEBPACK_IMPORTED_MODULE_3__["uuid"])(),
           name: 'arrow',
           stroke: strokeColor,
-          strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defalutParamValue.strokeWidth,
+          strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defaultParamValue.strokeWidth,
           globalCompositeOperation: 'source-over',
           points: _this.startPoints,
           dashEnabled: !!(paramValue && paramValue.lineType && paramValue.lineType === 'dash'),
@@ -50725,11 +50750,11 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
       drawLayer.batchDraw();
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var pubSub = drawEventPramas.pubSub; // mouseup event is triggered by move event but click event
+    _this.onDrawEnd = function (drawEventParams) {
+      var pubSub = drawEventParams.pubSub; // mouseup event is triggered by move event but click event
 
       if (_this.started) {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
 
         if (_this.lastArrow) {
           pubSub.pub('PUSH_HISTORY', _this.lastArrow);
@@ -50740,15 +50765,15 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
       _this.started = false;
     };
 
-    _this.onLeave = function (drawEventPramas) {
+    _this.onLeave = function (drawEventParams) {
       _this.isPaint = false;
       _this.started = false;
 
-      _this.disableTransform(drawEventPramas, _this.selectedNode);
+      _this.disableTransform(drawEventParams, _this.selectedNode);
     };
 
-    _this.onNodeRecreate = function (drawEventPramas, node) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onNodeRecreate = function (drawEventParams, node) {
+      var pubSub = drawEventParams.pubSub;
       node.on('transformend', function () {
         pubSub.pub('PUSH_HISTORY', this);
       });
@@ -50757,6 +50782,7 @@ var Arrow = /*#__PURE__*/function (_Plugin) {
       });
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_3__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -50815,12 +50841,12 @@ var Circle = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Circle);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'circle';
     _this.iconfont = 'iconfont icon-circle';
-    _this.title = '插入圆圈';
+    _this.title = '';
     _this.params = ['strokeWidth', 'lineType', 'color'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       strokeWidth: 2,
       lineType: 'solid',
       color: '#F5222D'
@@ -50835,9 +50861,9 @@ var Circle = /*#__PURE__*/function (_Plugin) {
 
     _this.startPoint = [0, 0];
 
-    _this.enableTransform = function (drawEventPramas, node) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.enableTransform = function (drawEventParams, node) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
 
       if (!_this.transformer) {
         _this.transformer = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Transformer(_extends({}, _common_constants__WEBPACK_IMPORTED_MODULE_2__["transformerStyle"]));
@@ -50858,10 +50884,10 @@ var Circle = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.disableTransform = function (drawEventPramas, node, remove) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          pubSub = drawEventPramas.pubSub;
+    _this.disableTransform = function (drawEventParams, node, remove) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          pubSub = drawEventParams.pubSub;
 
       if (_this.transformer) {
         _this.transformer.remove();
@@ -50887,36 +50913,36 @@ var Circle = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.onEnter = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.onEnter = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
       var container = stage.container();
       container.tabIndex = 1; // make it focusable
 
       container.focus();
       container.addEventListener('keyup', function (e) {
         if (e.key === 'Backspace' && _this.selectedNode) {
-          _this.disableTransform(drawEventPramas, _this.selectedNode, true);
+          _this.disableTransform(drawEventParams, _this.selectedNode, true);
 
           drawLayer.draw();
         }
       });
     };
 
-    _this.onClick = function (drawEventPramas) {
-      var event = drawEventPramas.event;
+    _this.onClick = function (drawEventParams) {
+      var event = drawEventParams.event;
 
       if (event.target.name && event.target.name() === 'circle') {
         // 之前没有选中节点或者在相同节点之间切换点击
         if (!_this.selectedNode || _this.selectedNode._id !== event.target._id) {
-          _this.selectedNode && _this.disableTransform(drawEventPramas, _this.selectedNode);
+          _this.selectedNode && _this.disableTransform(drawEventParams, _this.selectedNode);
 
-          _this.enableTransform(drawEventPramas, event.target);
+          _this.enableTransform(drawEventParams, event.target);
 
           _this.selectedNode = event.target;
         }
       } else {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
       }
     };
 
@@ -50924,11 +50950,11 @@ var Circle = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = true;
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue,
-          pubSub = drawEventPramas.pubSub;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue,
+          pubSub = drawEventParams.pubSub;
       var pos = stage.getPointerPosition();
       if (!_this.isPaint || _this.transformer || !pos) return;
 
@@ -50937,8 +50963,8 @@ var Circle = /*#__PURE__*/function (_Plugin) {
         _this.lastCircle = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Circle({
           id: Object(_common_utils__WEBPACK_IMPORTED_MODULE_3__["uuid"])(),
           name: 'circle',
-          stroke: paramValue && paramValue.color ? paramValue.color : _this.defalutParamValue.color,
-          strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defalutParamValue.strokeWidth,
+          stroke: paramValue && paramValue.color ? paramValue.color : _this.defaultParamValue.color,
+          strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defaultParamValue.strokeWidth,
           globalCompositeOperation: 'source-over',
           radius: 0,
           dashEnabled: !!(paramValue && paramValue.lineType && paramValue.lineType === 'dash'),
@@ -50969,11 +50995,11 @@ var Circle = /*#__PURE__*/function (_Plugin) {
       drawLayer.batchDraw();
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var pubSub = drawEventPramas.pubSub; // mouseup event is triggered by move event but click event
+    _this.onDrawEnd = function (drawEventParams) {
+      var pubSub = drawEventParams.pubSub; // mouseup event is triggered by move event but click event
 
       if (_this.started) {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
 
         if (_this.lastCircle) {
           pubSub.pub('PUSH_HISTORY', _this.lastCircle);
@@ -50984,15 +51010,15 @@ var Circle = /*#__PURE__*/function (_Plugin) {
       _this.started = false;
     };
 
-    _this.onLeave = function (drawEventPramas) {
+    _this.onLeave = function (drawEventParams) {
       _this.isPaint = false;
       _this.started = false;
 
-      _this.disableTransform(drawEventPramas, _this.selectedNode);
+      _this.disableTransform(drawEventParams, _this.selectedNode);
     };
 
-    _this.onNodeRecreate = function (drawEventPramas, node) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onNodeRecreate = function (drawEventParams, node) {
+      var pubSub = drawEventParams.pubSub;
       node.on('transformend', function () {
         pubSub.pub('PUSH_HISTORY', this);
       });
@@ -51001,6 +51027,7 @@ var Circle = /*#__PURE__*/function (_Plugin) {
       });
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_3__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -51061,7 +51088,7 @@ var Crop = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Crop);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'crop';
     _this.iconfont = 'iconfont icon-cut';
     _this.title = '图片裁剪';
@@ -51134,7 +51161,7 @@ var Crop = /*#__PURE__*/function (_Plugin) {
       $cropToolbar.setAttribute('style', cropToolbarStyle);
       fragment.appendChild($cropToolbar); // 创建文本
 
-      var $textNode = document.createTextNode('拖动边框调整图片显示范围');
+      var $textNode = document.createTextNode(_common_utils__WEBPACK_IMPORTED_MODULE_3__["i18n"].t('image.editor.plugin.crop.drag'));
       $cropToolbar.appendChild($textNode);
       var btnStyle = 'display: inline-block; width: 32px; height: 24px; border: 1px solid #C9C9D0;' + 'border-radius: 2px; text-align: center; cursor: pointer; line-height: 24px;'; // 创建取消按钮
 
@@ -51172,13 +51199,13 @@ var Crop = /*#__PURE__*/function (_Plugin) {
       }
     };
 
-    _this.onEnter = function (drawEventPramas) {
-      var stage = drawEventPramas.stage;
+    _this.onEnter = function (drawEventParams) {
+      var stage = drawEventParams.stage;
       stage.container().style.cursor = 'crosshair';
     };
 
-    _this.onDrawStart = function (drawEventPramas) {
-      var stage = drawEventPramas.stage;
+    _this.onDrawStart = function (drawEventParams) {
+      var stage = drawEventParams.stage;
       var startPos = stage.getPointerPosition(); // 当鼠标移出 stage 时，不会触发 mouseup，重新回到 stage 时，会重新触发 onDrawStart，这里就是为了防止重新触发 onDrawStart
 
       if (_this.isPaint || !startPos) return;
@@ -51222,8 +51249,8 @@ var Crop = /*#__PURE__*/function (_Plugin) {
       _this.virtualLayer.draw();
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage;
       var endPos = stage.getPointerPosition();
       if (!_this.isPaint || !endPos) return;
       if (document.getElementById(_this.toolbarId)) return; // 绘制初始裁剪区域
@@ -51263,10 +51290,10 @@ var Crop = /*#__PURE__*/function (_Plugin) {
       _this.virtualLayer.draw();
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          pixelRatio = drawEventPramas.pixelRatio,
-          reload = drawEventPramas.reload;
+    _this.onDrawEnd = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          pixelRatio = drawEventParams.pixelRatio,
+          reload = drawEventParams.reload;
 
       if (!_this.isPaint) {
         _this.isPaint = false;
@@ -51372,8 +51399,8 @@ var Crop = /*#__PURE__*/function (_Plugin) {
       _this.adjustToolbarPosition(stage);
     };
 
-    _this.onLeave = function (drawEventPramas) {
-      var stage = drawEventPramas.stage;
+    _this.onLeave = function (drawEventParams) {
+      var stage = drawEventParams.stage;
 
       _this.reset(stage);
 
@@ -51381,6 +51408,7 @@ var Crop = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = false;
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_3__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -51402,6 +51430,7 @@ var Crop = /*#__PURE__*/function (_Plugin) {
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "default", function() { return Download; });
 /* harmony import */ var _Plugin__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./Plugin */ "./src/plugins/Plugin.ts");
+/* harmony import */ var _common_utils__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ../common/utils */ "./src/common/utils.ts");
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 function _createSuper(Derived) { return function () { var Super = _getPrototypeOf(Derived), result; if (_isNativeReflectConstruct()) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
@@ -51420,6 +51449,7 @@ function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || func
 
 
 
+
 var Download = /*#__PURE__*/function (_Plugin) {
   _inherits(Download, _Plugin);
 
@@ -51430,14 +51460,14 @@ var Download = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Download);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'download';
     _this.iconfont = 'iconfont icon-download';
     _this.title = '下载图片';
 
-    _this.onEnter = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          pixelRatio = drawEventPramas.pixelRatio; // 延迟下载，等触发 plugin 的 onLeave 生命周期，清除未完成的现场
+    _this.onEnter = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          pixelRatio = drawEventParams.pixelRatio; // 延迟下载，等触发 plugin 的 onLeave 生命周期，清除未完成的现场
 
       setTimeout(function () {
         var canvas = stage.toCanvas({
@@ -51452,6 +51482,7 @@ var Download = /*#__PURE__*/function (_Plugin) {
       }, 100);
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_1__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -51506,37 +51537,37 @@ var Eraser = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Eraser);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'eraser';
     _this.iconfont = 'iconfont icon-eraser';
     _this.title = '擦除';
     _this.params = ['strokeWidth'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       strokeWidth: 2
     };
     _this.lastLine = null;
     _this.isPaint = false;
 
-    _this.onDrawStart = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue;
+    _this.onDrawStart = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue;
       var pos = stage.getPointerPosition();
       if (!pos) return;
       _this.isPaint = true;
       _this.lastLine = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Line({
         id: Object(_common_utils__WEBPACK_IMPORTED_MODULE_2__["uuid"])(),
         stroke: '#df4b26',
-        strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defalutParamValue.strokeWidth,
+        strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defaultParamValue.strokeWidth,
         globalCompositeOperation: 'destination-out',
         points: [pos.x, pos.y]
       });
       drawLayer.add(_this.lastLine);
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
       var pos = stage.getPointerPosition();
       if (!_this.isPaint || !pos) return;
 
@@ -51547,8 +51578,8 @@ var Eraser = /*#__PURE__*/function (_Plugin) {
       drawLayer.batchDraw();
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onDrawEnd = function (drawEventParams) {
+      var pubSub = drawEventParams.pubSub;
       _this.isPaint = false;
       pubSub.pub('PUSH_HISTORY', _this.lastLine);
     };
@@ -51557,6 +51588,7 @@ var Eraser = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = false;
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -51625,12 +51657,12 @@ var Mosaic = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Mosaic);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'mosaic';
     _this.iconfont = 'iconfont icon-mosaic';
     _this.title = '马赛克';
     _this.params = ['strokeWidth'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       strokeWidth: 2
     };
     _this.isPaint = false;
@@ -51715,9 +51747,9 @@ var Mosaic = /*#__PURE__*/function (_Plugin) {
       return ts;
     };
 
-    _this.onDrawStart = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          imageData = drawEventPramas.imageData;
+    _this.onDrawStart = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          imageData = drawEventParams.imageData;
       _this.tiles = [];
       _this.width = stage.width();
       _this.height = stage.height();
@@ -51758,19 +51790,19 @@ var Mosaic = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = true;
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue;
       var pos = stage.getPointerPosition();
       if (!_this.isPaint || !pos) return;
-      var strokeWidth = paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defalutParamValue.strokeWidth;
+      var strokeWidth = paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defaultParamValue.strokeWidth;
 
       _this.drawTile(_this.getTilesByPoint(pos.x, pos.y, strokeWidth), drawLayer);
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onDrawEnd = function (drawEventParams) {
+      var pubSub = drawEventParams.pubSub;
       _this.isPaint = false;
       pubSub.pub('PUSH_HISTORY', _this.rectGroup);
     };
@@ -51779,6 +51811,7 @@ var Mosaic = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = false;
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -51833,12 +51866,12 @@ var Pen = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Pen);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'pen';
     _this.iconfont = 'iconfont icon-pen';
     _this.title = '画笔';
     _this.params = ['strokeWidth', 'lineType', 'color'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       strokeWidth: 2,
       lineType: 'solid',
       color: '#F5222D'
@@ -51846,17 +51879,17 @@ var Pen = /*#__PURE__*/function (_Plugin) {
     _this.lastLine = null;
     _this.isPaint = false;
 
-    _this.onDrawStart = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue;
+    _this.onDrawStart = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue;
       var pos = stage.getPointerPosition();
       if (!pos) return;
       _this.isPaint = true;
       _this.lastLine = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Line({
         id: Object(_common_utils__WEBPACK_IMPORTED_MODULE_2__["uuid"])(),
-        stroke: paramValue && paramValue.color ? paramValue.color : _this.defalutParamValue.color,
-        strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defalutParamValue.strokeWidth,
+        stroke: paramValue && paramValue.color ? paramValue.color : _this.defaultParamValue.color,
+        strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defaultParamValue.strokeWidth,
         globalCompositeOperation: 'source-over',
         points: [pos.x, pos.y],
         dashEnabled: !!(paramValue && paramValue.lineType && paramValue.lineType === 'dash'),
@@ -51868,9 +51901,9 @@ var Pen = /*#__PURE__*/function (_Plugin) {
       drawLayer.add(_this.lastLine);
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
       var pos = stage.getPointerPosition();
       if (!_this.isPaint || !pos) return;
 
@@ -51881,8 +51914,8 @@ var Pen = /*#__PURE__*/function (_Plugin) {
       drawLayer.batchDraw();
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onDrawEnd = function (drawEventParams) {
+      var pubSub = drawEventParams.pubSub;
       _this.isPaint = false;
       pubSub.pub('PUSH_HISTORY', _this.lastLine);
     };
@@ -51891,6 +51924,7 @@ var Pen = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = false;
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -51915,6 +51949,10 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 
 var Plugin = function Plugin() {
   _classCallCheck(this, Plugin);
+
+  this.t = function () {
+    return '';
+  };
 };
 
 
@@ -52012,12 +52050,12 @@ var Rect = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Rect);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'rect';
     _this.iconfont = 'iconfont icon-square';
     _this.title = '插入矩形';
     _this.params = ['strokeWidth', 'lineType', 'color'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       strokeWidth: 2,
       lineType: 'solid',
       color: '#F5222D'
@@ -52032,9 +52070,9 @@ var Rect = /*#__PURE__*/function (_Plugin) {
 
     _this.startPoint = [0, 0];
 
-    _this.enableTransform = function (drawEventPramas, node) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.enableTransform = function (drawEventParams, node) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
 
       if (!_this.transformer) {
         _this.transformer = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Transformer(_extends(_extends({}, _common_constants__WEBPACK_IMPORTED_MODULE_2__["transformerStyle"]), {
@@ -52057,10 +52095,10 @@ var Rect = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.disableTransform = function (drawEventPramas, node, remove) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          pubSub = drawEventPramas.pubSub;
+    _this.disableTransform = function (drawEventParams, node, remove) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          pubSub = drawEventParams.pubSub;
 
       if (_this.transformer) {
         _this.transformer.remove();
@@ -52086,36 +52124,36 @@ var Rect = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.onEnter = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.onEnter = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
       var container = stage.container();
       container.tabIndex = 1; // make it focusable
 
       container.focus();
       container.addEventListener('keyup', function (e) {
         if (e.key === 'Backspace' && _this.selectedNode) {
-          _this.disableTransform(drawEventPramas, _this.selectedNode, true);
+          _this.disableTransform(drawEventParams, _this.selectedNode, true);
 
           drawLayer.draw();
         }
       });
     };
 
-    _this.onClick = function (drawEventPramas) {
-      var event = drawEventPramas.event;
+    _this.onClick = function (drawEventParams) {
+      var event = drawEventParams.event;
 
       if (event.target.name && event.target.name() === 'rect') {
         // 之前没有选中节点或者在相同节点之间切换点击
         if (!_this.selectedNode || _this.selectedNode._id !== event.target._id) {
-          _this.selectedNode && _this.disableTransform(drawEventPramas, _this.selectedNode);
+          _this.selectedNode && _this.disableTransform(drawEventParams, _this.selectedNode);
 
-          _this.enableTransform(drawEventPramas, event.target);
+          _this.enableTransform(drawEventParams, event.target);
 
           _this.selectedNode = event.target;
         }
       } else {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
       }
     };
 
@@ -52123,11 +52161,11 @@ var Rect = /*#__PURE__*/function (_Plugin) {
       _this.isPaint = true;
     };
 
-    _this.onDraw = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue,
-          pubSub = drawEventPramas.pubSub;
+    _this.onDraw = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue,
+          pubSub = drawEventParams.pubSub;
       var pos = stage.getPointerPosition();
       if (!_this.isPaint || _this.transformer || !pos) return;
 
@@ -52136,8 +52174,8 @@ var Rect = /*#__PURE__*/function (_Plugin) {
         _this.lastRect = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Rect({
           id: Object(_common_utils__WEBPACK_IMPORTED_MODULE_3__["uuid"])(),
           name: 'rect',
-          stroke: paramValue && paramValue.color ? paramValue.color : _this.defalutParamValue.color,
-          strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defalutParamValue.strokeWidth,
+          stroke: paramValue && paramValue.color ? paramValue.color : _this.defaultParamValue.color,
+          strokeWidth: paramValue && paramValue.strokeWidth ? paramValue.strokeWidth : _this.defaultParamValue.strokeWidth,
           globalCompositeOperation: 'source-over',
           x: pos.x,
           y: pos.y,
@@ -52165,11 +52203,11 @@ var Rect = /*#__PURE__*/function (_Plugin) {
       drawLayer.batchDraw();
     };
 
-    _this.onDrawEnd = function (drawEventPramas) {
-      var pubSub = drawEventPramas.pubSub; // mouseup event is triggered by move event but click event
+    _this.onDrawEnd = function (drawEventParams) {
+      var pubSub = drawEventParams.pubSub; // mouseup event is triggered by move event but click event
 
       if (_this.started) {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
 
         if (_this.lastRect) {
           pubSub.pub('PUSH_HISTORY', _this.lastRect);
@@ -52180,15 +52218,15 @@ var Rect = /*#__PURE__*/function (_Plugin) {
       _this.started = false;
     };
 
-    _this.onLeave = function (drawEventPramas) {
+    _this.onLeave = function (drawEventParams) {
       _this.isPaint = false;
       _this.started = false;
 
-      _this.disableTransform(drawEventPramas, _this.selectedNode);
+      _this.disableTransform(drawEventParams, _this.selectedNode);
     };
 
-    _this.onNodeRecreate = function (drawEventPramas, node) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onNodeRecreate = function (drawEventParams, node) {
+      var pubSub = drawEventParams.pubSub;
       node.on('transformend', function () {
         pubSub.pub('PUSH_HISTORY', this);
       });
@@ -52197,6 +52235,7 @@ var Rect = /*#__PURE__*/function (_Plugin) {
       });
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_3__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -52220,6 +52259,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var konva__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! konva */ "./node_modules/konva/lib/index.js");
 /* harmony import */ var konva__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(konva__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var _Plugin__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./Plugin */ "./src/plugins/Plugin.ts");
+/* harmony import */ var _common_utils__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../common/utils */ "./src/common/utils.ts");
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 function _createSuper(Derived) { return function () { var Super = _getPrototypeOf(Derived), result; if (_isNativeReflectConstruct()) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
@@ -52239,6 +52279,7 @@ function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || func
 
 
 
+
 var Repeal = /*#__PURE__*/function (_Plugin) {
   _inherits(Repeal, _Plugin);
 
@@ -52249,16 +52290,16 @@ var Repeal = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Repeal);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'repeal';
     _this.iconfont = 'iconfont icon-repeal';
     _this.title = '撤销';
 
-    _this.onEnter = function (drawEventPramas) {
-      var drawLayer = drawEventPramas.drawLayer,
-          historyStack = drawEventPramas.historyStack,
-          plugins = drawEventPramas.plugins,
-          pubSub = drawEventPramas.pubSub;
+    _this.onEnter = function (drawEventParams) {
+      var drawLayer = drawEventParams.drawLayer,
+          historyStack = drawEventParams.historyStack,
+          plugins = drawEventParams.plugins,
+          pubSub = drawEventParams.pubSub;
       drawLayer.removeChildren();
       historyStack.pop();
       pubSub.pub('POP_HISTORY', historyStack);
@@ -52278,7 +52319,7 @@ var Repeal = /*#__PURE__*/function (_Plugin) {
           setTimeout(function () {
             for (var _i = 0; _i < plugins.length; _i++) {
               if (plugins[_i].shapeName && plugins[_i].shapeName === recreatedNode.name()) {
-                plugins[_i].onNodeRecreate && plugins[_i].onNodeRecreate(drawEventPramas, recreatedNode);
+                plugins[_i].onNodeRecreate && plugins[_i].onNodeRecreate(drawEventParams, recreatedNode);
                 break;
               }
             }
@@ -52288,6 +52329,7 @@ var Repeal = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_2__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
@@ -52346,12 +52388,12 @@ var Text = /*#__PURE__*/function (_Plugin) {
 
     _classCallCheck(this, Text);
 
-    _this = _super.apply(this, arguments);
+    _this = _super.call(this);
     _this.name = 'text';
     _this.iconfont = 'iconfont icon-text';
     _this.title = '插入文字';
     _this.params = ['fontSize', 'color'];
-    _this.defalutParamValue = {
+    _this.defaultParamValue = {
       fontSize: 12,
       color: '#F5222D'
     };
@@ -52390,7 +52432,7 @@ var Text = /*#__PURE__*/function (_Plugin) {
       textarea.style.position = 'absolute';
       textarea.style.left = textNode.x() + 'px';
       textarea.style.top = textNode.y() + 'px';
-      textarea.style.width = textNode.width() + 'px';
+      textarea.style.width = textNode.width() + 20 + 'px';
       textarea.style.height = textNode.height() + 'px';
       textarea.style.lineHeight = String(textNode.lineHeight());
       textarea.style.padding = textNode.padding() + 'px';
@@ -52408,7 +52450,7 @@ var Text = /*#__PURE__*/function (_Plugin) {
       textarea.addEventListener('keyup', function (e) {
         textNode.text(e.target.value);
         drawLayer.draw();
-        textarea.style.width = textNode.width() + 'px';
+        textarea.style.width = textNode.width() + 20 + 'px';
         textarea.style.height = textNode.height() + 'px';
       });
       textarea.addEventListener('blur', function () {
@@ -52431,9 +52473,9 @@ var Text = /*#__PURE__*/function (_Plugin) {
       return textarea;
     };
 
-    _this.enableTransform = function (drawEventPramas, node) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.enableTransform = function (drawEventParams, node) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
 
       if (!_this.transformer) {
         _this.transformer = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Transformer(_extends(_extends({}, _common_constants__WEBPACK_IMPORTED_MODULE_2__["transformerStyle"]), {
@@ -52457,10 +52499,10 @@ var Text = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.disableTransform = function (drawEventPramas, node, remove) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          pubSub = drawEventPramas.pubSub;
+    _this.disableTransform = function (drawEventParams, node, remove) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          pubSub = drawEventParams.pubSub;
 
       if (_this.transformer) {
         _this.transformer.remove();
@@ -52487,9 +52529,9 @@ var Text = /*#__PURE__*/function (_Plugin) {
       drawLayer.draw();
     };
 
-    _this.onEnter = function (drawEventPramas) {
-      var stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer;
+    _this.onEnter = function (drawEventParams) {
+      var stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer;
       var container = stage.container();
       container.style.cursor = 'text';
       container.tabIndex = 1; // make it focusable
@@ -52497,39 +52539,39 @@ var Text = /*#__PURE__*/function (_Plugin) {
       container.focus();
       container.addEventListener('keyup', function (e) {
         if (e.key === 'Backspace' && _this.selectedNode) {
-          _this.disableTransform(drawEventPramas, _this.selectedNode, true);
+          _this.disableTransform(drawEventParams, _this.selectedNode, true);
 
           drawLayer.draw();
         }
       });
     };
 
-    _this.onClick = function (drawEventPramas) {
-      var event = drawEventPramas.event,
-          stage = drawEventPramas.stage,
-          drawLayer = drawEventPramas.drawLayer,
-          paramValue = drawEventPramas.paramValue,
-          pubSub = drawEventPramas.pubSub;
+    _this.onClick = function (drawEventParams) {
+      var event = drawEventParams.event,
+          stage = drawEventParams.stage,
+          drawLayer = drawEventParams.drawLayer,
+          paramValue = drawEventParams.paramValue,
+          pubSub = drawEventParams.pubSub;
 
       if (event.target.name && event.target.name() === 'text') {
         // 之前没有选中节点或者在相同节点之间切换点击
         if (!_this.selectedNode || _this.selectedNode._id !== event.target._id) {
-          _this.selectedNode && _this.disableTransform(drawEventPramas, _this.selectedNode);
+          _this.selectedNode && _this.disableTransform(drawEventParams, _this.selectedNode);
 
-          _this.enableTransform(drawEventPramas, event.target);
+          _this.enableTransform(drawEventParams, event.target);
 
           _this.selectedNode = event.target;
         }
 
         return;
       } else if (_this.selectedNode) {
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
 
         return;
       }
 
-      var fontSize = paramValue && paramValue.fontSize ? paramValue.fontSize : _this.defalutParamValue.fontSize;
-      var color = paramValue && paramValue.color ? paramValue.color : _this.defalutParamValue.color;
+      var fontSize = paramValue && paramValue.fontSize ? paramValue.fontSize : _this.defaultParamValue.fontSize;
+      var color = paramValue && paramValue.color ? paramValue.color : _this.defaultParamValue.color;
       var startPos = stage.getPointerPosition();
       if (!startPos) return;
       var textNode = new konva__WEBPACK_IMPORTED_MODULE_0___default.a.Text({
@@ -52566,7 +52608,7 @@ var Text = /*#__PURE__*/function (_Plugin) {
 
       textNode.on('dblclick dbltap', function (e) {
         // dblclick 前会触发两次 onClick 事件，因此要清楚 onClick 事件里的状态
-        _this.disableTransform(drawEventPramas, _this.selectedNode);
+        _this.disableTransform(drawEventParams, _this.selectedNode);
 
         e.cancelBubble = true;
 
@@ -52582,22 +52624,23 @@ var Text = /*#__PURE__*/function (_Plugin) {
       });
     };
 
-    _this.onLeave = function (drawEventPramas) {
-      var stage = drawEventPramas.stage;
+    _this.onLeave = function (drawEventParams) {
+      var stage = drawEventParams.stage;
       stage.container().style.cursor = 'default';
 
       _this.removeTextareaBlurModal();
 
-      _this.disableTransform(drawEventPramas, _this.selectedNode);
+      _this.disableTransform(drawEventParams, _this.selectedNode);
     };
 
-    _this.onNodeRecreate = function (drawEventPramas, node) {
-      var pubSub = drawEventPramas.pubSub;
+    _this.onNodeRecreate = function (drawEventParams, node) {
+      var pubSub = drawEventParams.pubSub;
       node.on('dragend', function () {
         pubSub.pub('PUSH_HISTORY', this);
       });
     };
 
+    _this.title = _common_utils__WEBPACK_IMPORTED_MODULE_3__["i18n"].t("image.editor.plugin.".concat(_this.name));
     return _this;
   }
 
